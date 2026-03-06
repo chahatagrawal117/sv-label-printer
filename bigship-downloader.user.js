@@ -256,28 +256,38 @@
 
     // ── Open in Label Arranger ────────────────────────────────────────────
     arrangerBtn.addEventListener('click', async () => {
-      if (!collected.length) return;
+      if (!collected.length) { showToast('No labels collected yet.', 'error'); return; }
       arrangerBtn.innerHTML = '⏳ Preparing…';
       arrangerBtn.disabled  = true;
 
-      const { blob, name } = await buildZip();
+      try {
+        cachedZip = null;
+        const { blob, name } = await buildZip();
+        const zipName = name + '.zip';
 
-      // Convert blob to base64 and store in localStorage
-      // Label Arranger reads this on load and auto-processes it
-      const reader = new FileReader();
-      reader.onload = function () {
-        const b64 = reader.result.split(',')[1];
-        localStorage.setItem('sv_pending_zip', JSON.stringify({
-          name : name + '.zip',
-          data : b64,
-          ts   : Date.now(),
-        }));
-        window.open(LABEL_ARRANGER_URL, '_blank');
-        showToast('✓ Opening Label Arranger…\nLabels will load automatically!', 'success');
-        arrangerBtn.innerHTML = '🖨 Open in Label Arranger';
-        arrangerBtn.disabled  = false;
-      };
-      reader.readAsDataURL(new Blob([blob], { type: 'application/zip' }));
+        // Step 1: Open the Label Arranger tab first
+        const newTab = window.open(`${LABEL_ARRANGER_URL}?autoload=1`, '_blank');
+
+        // Step 2: Convert ZIP to base64 and write to localStorage
+        // The new tab polls localStorage until it finds this entry
+        const reader = new FileReader();
+        reader.onload = function () {
+          const b64 = reader.result.split(',')[1];
+          localStorage.setItem('sv_pending_zip', JSON.stringify({
+            name: zipName,
+            data: b64,
+            ts:   Date.now(),
+          }));
+          showToast(`✓ Opening Label Arranger with ${collected.length} labels…`, 'success');
+        };
+        reader.readAsDataURL(new Blob([blob], { type: 'application/zip' }));
+
+      } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+      }
+
+      arrangerBtn.innerHTML = '🖨 Open in Label Arranger';
+      arrangerBtn.disabled  = false;
     });
 
     // ── Clear ─────────────────────────────────────────────────────────────
