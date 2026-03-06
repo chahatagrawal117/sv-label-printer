@@ -302,7 +302,7 @@
 
   // ── Watch for SPA navigation ──────────────────────────────────────────────
   let lastUrl = location.href;
-  const isReportsPage = () => /reports|shipment|orders/i.test(location.href);
+  const isReportsPage = () => location.href.includes('/reports/all-shipment');
 
   new MutationObserver(() => {
     if (location.href !== lastUrl) {
