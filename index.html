@@ -91,7 +91,7 @@ h1{font-size:clamp(32px,6vw,52px);font-weight:800;line-height:1.1;letter-spacing
     <div class="drop-icon">📦</div>
     <div class="drop-title">Drop Labels ZIP or Folder here</div>
     <div class="drop-sub">
-      Drop the <strong style="color:var(--accent)">Labels_2026-03-06_1430.zip</strong> from BigShip collector<br>
+      Drop the <strong style="color:var(--accent)" id="zip-example">Labels_….zip</strong> from BigShip collector<br>
       <span style="font-size:12px;opacity:0.6">Or choose a folder · or individual PDFs · auto-sorts by filename</span>
     </div>
     <label class="drop-btn" for="file-input">📄 Choose ZIP / PDF</label>
@@ -153,19 +153,44 @@ const LAYOUTS = {
   'mix': { label:'1+2',  cap:3, slots:[{c:0,r:0,cw:2,rh:1},{c:0,r:1,cw:1,rh:1},{c:1,r:1,cw:1,rh:1}] },
 };
 
+// ── Set dynamic example ZIP name in drop zone ─────────────────────────────
+(function(){
+  const now  = new Date();
+  const date = now.toISOString().slice(0,10);
+  const hh   = String(now.getHours()).padStart(2,'0');
+  const mm   = String(now.getMinutes()).padStart(2,'0');
+  const el   = document.getElementById('zip-example');
+  if (el) el.textContent = `Labels_${date}_${hh}${mm}.zip`;
+})();
+
 // ── Auto-load ZIP passed from BigShip collector ───────────────────────────
-window.addEventListener('load', async () => {
+async function tryAutoLoad() {
   try {
     const raw = localStorage.getItem('sv_pending_zip');
-    if (!raw) return;
+    if (!raw) return false;
     const { name, data, ts } = JSON.parse(raw);
-    if (Date.now() - ts > 5 * 60 * 1000) { localStorage.removeItem('sv_pending_zip'); return; }
-    localStorage.removeItem('sv_pending_zip');
-    showToast(`📦 Auto-loading ${name}…`, 'success');
+    if (Date.now() - ts > 5 * 60 * 1000) { localStorage.removeItem('sv_pending_zip'); return false; }
+    localStorage.removeItem('sv_pending_zip'); // consume immediately so it's not loaded twice
+    showToast(`📦 Loading ${name}…`, 'success');
     const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
     const file  = new File([bytes], name, { type: 'application/zip' });
     await processZip(file);
-  } catch (e) { console.error('[SV] Auto-load failed:', e); }
+    return true;
+  } catch (e) { console.error('[SV] Auto-load failed:', e); return false; }
+}
+
+window.addEventListener('load', async () => {
+  // Try immediately first
+  const loaded = await tryAutoLoad();
+  if (!loaded) {
+    // Poll for up to 3 seconds in case BigShip tab writes localStorage after this tab opens
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts++;
+      const ok = await tryAutoLoad();
+      if (ok || attempts >= 15) clearInterval(poll); // stop after 3s (15 × 200ms)
+    }, 200);
+  }
 });
 
 // ── Canvas helpers ────────────────────────────────────────────────────────
