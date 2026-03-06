@@ -163,34 +163,49 @@ const LAYOUTS = {
   if (el) el.textContent = `Labels_${date}_${hh}${mm}.zip`;
 })();
 
-// ── Auto-load ZIP passed from BigShip collector ───────────────────────────
-async function tryAutoLoad() {
-  try {
-    const raw = localStorage.getItem('sv_pending_zip');
-    if (!raw) return false;
-    const { name, data, ts } = JSON.parse(raw);
-    if (Date.now() - ts > 5 * 60 * 1000) { localStorage.removeItem('sv_pending_zip'); return false; }
-    localStorage.removeItem('sv_pending_zip'); // consume immediately so it's not loaded twice
-    showToast(`📦 Loading ${name}…`, 'success');
-    const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
-    const file  = new File([bytes], name, { type: 'application/zip' });
-    await processZip(file);
-    return true;
-  } catch (e) { console.error('[SV] Auto-load failed:', e); return false; }
-}
+// ── Auto-load when opened from BigShip (?autoload=1) ─────────────────────
+window.addEventListener('load', () => {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('autoload') !== '1') return;
 
-window.addEventListener('load', async () => {
-  // Try immediately first
-  const loaded = await tryAutoLoad();
-  if (!loaded) {
-    // Poll for up to 3 seconds in case BigShip tab writes localStorage after this tab opens
-    let attempts = 0;
-    const poll = setInterval(async () => {
-      attempts++;
-      const ok = await tryAutoLoad();
-      if (ok || attempts >= 15) clearInterval(poll); // stop after 3s (15 × 200ms)
-    }, 200);
-  }
+  // Show loading banner
+  const banner = document.createElement('div');
+  banner.id = 'sv-banner';
+  banner.style.cssText = `
+    background:rgba(74,222,128,0.08);border:1.5px solid rgba(74,222,128,0.4);
+    border-radius:12px;padding:18px 24px;margin-bottom:20px;text-align:center;
+  `;
+  banner.innerHTML = `
+    <div style="font-size:15px;font-weight:800;color:var(--accent);margin-bottom:6px">
+      ⏳ Loading labels from BigShip…
+    </div>
+    <div style="font-size:12px;color:var(--muted)" id="sv-banner-sub">Receiving data…</div>
+  `;
+  document.getElementById('dropzone').parentNode.insertBefore(banner, document.getElementById('dropzone'));
+
+  // Poll localStorage until BigShip tab writes the ZIP data (up to 15 seconds)
+  let attempts = 0;
+  const poll = setInterval(async () => {
+    attempts++;
+    try {
+      const raw = localStorage.getItem('sv_pending_zip');
+      if (raw) {
+        clearInterval(poll);
+        const { name, data, ts } = JSON.parse(raw);
+        localStorage.removeItem('sv_pending_zip');
+        document.getElementById('sv-banner-sub').textContent = `Loading ${name}…`;
+        const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+        const file  = new File([bytes], name, { type: 'application/zip' });
+        await processZip(file);
+        return;
+      }
+    } catch(e) { clearInterval(poll); }
+
+    if (attempts >= 150) { // 15 seconds timeout
+      clearInterval(poll);
+      document.getElementById('sv-banner-sub').textContent = 'Timed out — please drop the ZIP manually.';
+    }
+  }, 100);
 });
 
 // ── Canvas helpers ────────────────────────────────────────────────────────
@@ -282,6 +297,7 @@ async function processZip(zipFile) {
   pf.style.width = '100%';
   pa.style.display = 'none';
   syncPageLayouts(); renderThumbnails(); renderSheetPreview(); showSections();
+  document.getElementById('sv-banner')?.remove();
   showToast(`✓ ${filtered.length} labels loaded from ZIP`, 'success');
 }
 
@@ -602,6 +618,7 @@ document.getElementById('reset-btn').addEventListener('click', () => {
   document.getElementById('sheet-pages').innerHTML='';
   ['preview-section','sheet-preview','action-bar'].forEach(id => document.getElementById(id).style.display='none');
   document.getElementById('dropzone').style.display='block';
+  document.getElementById('sv-banner')?.remove();
   fileInput.value=''; folderInput.value='';
 });
 
